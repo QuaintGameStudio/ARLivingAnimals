@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>AR Coloring Page — Scan & Watch</title>
+    <meta name="description" content="Scan your coloring page to see it come alive with an animated video overlay using Augmented Reality." />
+
+    <!-- A-Frame & MindAR Image Tracking -->
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+      /* ── Reset ── */
+      *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+      body {
+        font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        overflow: hidden;
+        background: #000;
+        color: #fff;
+      }
+
+      /* Force hide A-Frame VR button */
+      .a-enter-vr {
+        display: none !important;
+      }
+
+      /* ── Loading / Splash overlay ── */
+      #splash-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+        transition: opacity 0.6s ease, visibility 0.6s ease;
+      }
+      #splash-overlay.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .splash-icon {
+        width: 80px;
+        height: 80px;
+        margin-bottom: 28px;
+        animation: pulse 2s ease-in-out infinite;
+      }
+      .splash-icon svg { width: 100%; height: 100%; }
+
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.9; }
+        50%      { transform: scale(1.08); opacity: 1; }
+      }
+
+      .splash-title {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+        background: linear-gradient(90deg, #a78bfa, #818cf8, #6366f1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      .splash-sub {
+        font-size: 14px;
+        color: rgba(255,255,255,0.55);
+        margin-bottom: 32px;
+      }
+
+      /* spinner */
+      .spinner {
+        width: 44px;
+        height: 44px;
+        border: 3px solid rgba(255,255,255,0.12);
+        border-top-color: #818cf8;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .splash-status {
+        margin-top: 18px;
+        font-size: 13px;
+        color: rgba(255,255,255,0.45);
+        transition: color 0.3s;
+      }
+
+      /* ── Scanning HUD ── */
+      #scan-hud {
+        position: fixed;
+        bottom: 36px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 26px;
+        background: rgba(15, 12, 41, 0.75);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 1px solid rgba(129,140,248,0.25);
+        border-radius: 50px;
+        transition: opacity 0.4s ease, transform 0.4s ease;
+        pointer-events: none;
+      }
+      #scan-hud.hidden {
+        opacity: 0;
+        transform: translateX(-50%) translateY(20px);
+      }
+
+      .hud-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #818cf8;
+        animation: blink 1.4s ease-in-out infinite;
+      }
+      @keyframes blink {
+        0%, 100% { opacity: 0.35; }
+        50%      { opacity: 1; }
+      }
+
+      .hud-text {
+        font-size: 14px;
+        font-weight: 500;
+        color: rgba(255,255,255,0.85);
+        white-space: nowrap;
+      }
+
+      /* ── Found badge ── */
+      #found-badge {
+        position: fixed;
+        top: 28px;
+        left: 50%;
+        transform: translateX(-50%) translateY(-60px);
+        z-index: 1000;
+        padding: 10px 22px;
+        background: rgba(16, 185, 129, 0.85);
+        backdrop-filter: blur(10px);
+        border-radius: 30px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        letter-spacing: 0.3px;
+        transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s;
+        opacity: 0;
+        pointer-events: none;
+      }
+      #found-badge.visible {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+      }
+
+      /* ── Record button ── */
+      #record-btn {
+        position: fixed;
+        bottom: 36px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1001;
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        border: 4px solid rgba(255,255,255,0.8);
+        background: rgba(255, 60, 60, 0.7);
+        cursor: pointer;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.15s;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: none;
+      }
+      #record-btn .rec-inner {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #ff3c3c;
+        transition: transform 0.2s, border-radius 0.2s;
+      }
+      #record-btn.recording {
+        border-color: #ff3c3c;
+        animation: rec-pulse 1s ease-in-out infinite;
+      }
+      #record-btn.recording .rec-inner {
+        border-radius: 6px;
+        transform: scale(0.7);
+        background: #ff3c3c;
+      }
+      @keyframes rec-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(255,60,60,0.5); }
+        50%      { box-shadow: 0 0 0 12px rgba(255,60,60,0); }
+      }
+
+      /* Recording timer */
+      #rec-timer {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1001;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 18px;
+        background: rgba(200, 30, 30, 0.85);
+        backdrop-filter: blur(10px);
+        border-radius: 30px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #fff;
+      }
+      #rec-timer .rec-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #fff;
+        animation: blink 0.8s ease-in-out infinite;
+      }
+
+      /* ── Preview overlay ── */
+      #preview-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0,0,0,0.92);
+        backdrop-filter: blur(20px);
+      }
+      #preview-overlay.visible {
+        display: flex;
+      }
+
+      #preview-video {
+        max-width: 85%;
+        max-height: 55vh;
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        margin-bottom: 28px;
+      }
+
+      .preview-actions {
+        display: flex;
+        gap: 16px;
+      }
+
+      .preview-btn {
+        padding: 14px 28px;
+        border: none;
+        border-radius: 50px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: transform 0.15s, opacity 0.15s;
+      }
+      .preview-btn:active { transform: scale(0.95); }
+
+      .btn-share {
+        background: linear-gradient(90deg, #6366f1, #818cf8);
+        color: #fff;
+      }
+      .btn-download {
+        background: rgba(255,255,255,0.15);
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.2);
+      }
+      .btn-close {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.1);
+        border: none;
+        color: #fff;
+        font-size: 20px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    </style>
+
+    <!-- ── Video-overlay A-Frame component ── -->
+    <script>
+      AFRAME.registerComponent('video-overlay', {
+        init: function () {
+          const targetEntity = this.el;
+          const video = document.querySelector('#ar-video');
+          const recordBtn = document.getElementById('record-btn');
+
+          // When the image target is found → play video with sound
+          targetEntity.addEventListener('targetFound', () => {
+            console.log('[AR] Target found — playing video');
+            document.getElementById('scan-hud').classList.add('hidden');
+
+            const badge = document.getElementById('found-badge');
+            badge.classList.add('visible');
+            setTimeout(() => badge.classList.remove('visible'), 2400);
+
+            video.currentTime = 0;
+            // Start muted (required for autoplay), then unmute
+            video.muted = true;
+            video.play().then(() => {
+              video.muted = false;  // unmute after play succeeds
+            }).catch(err => console.warn('Video play blocked:', err));
+
+            // Show record button
+            recordBtn.style.display = 'flex';
+          });
+
+          // When the image target is lost → pause video
+          targetEntity.addEventListener('targetLost', () => {
+            console.log('[AR] Target lost — pausing video');
+            video.pause();
+            document.getElementById('scan-hud').classList.remove('hidden');
+            recordBtn.style.display = 'none';
+          });
+        }
+      });
+    </script>
+  </head>
+
+  <body>
+    <!-- ════════════  SPLASH / LOADING  ════════════ -->
+    <div id="splash-overlay">
+      <div class="splash-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" color="#818cf8">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+      </div>
+      <div class="splash-title">AR Coloring Page</div>
+      <div class="splash-sub">Initialising camera &amp; AR engine…</div>
+      <div class="spinner"></div>
+      <div class="splash-status" id="splash-status">Loading assets…</div>
+    </div>
+
+    <!-- ════════════  SCAN HUD  ════════════ -->
+    <div id="scan-hud" class="hidden">
+      <span class="hud-dot"></span>
+      <span class="hud-text">Point camera at your coloring page</span>
+    </div>
+
+    <!-- ════════════  FOUND BADGE  ════════════ -->
+    <div id="found-badge">✨ Image Detected!</div>
+
+    <!-- ════════════  RECORD BUTTON  ════════════ -->
+    <div id="record-btn">
+      <div class="rec-inner"></div>
+    </div>
+
+    <!-- ════════════  RECORDING TIMER  ════════════ -->
+    <div id="rec-timer">
+      <span class="rec-dot"></span>
+      <span id="rec-time">0:00</span>
+    </div>
+
+    <!-- ════════════  PREVIEW OVERLAY  ════════════ -->
+    <div id="preview-overlay">
+      <button class="btn-close" id="preview-close">✕</button>
+      <video id="preview-video" controls playsinline webkit-playsinline></video>
+      <div class="preview-actions">
+        <button class="preview-btn btn-share" id="btn-share">
+          <span>📤</span> Share
+        </button>
+        <button class="preview-btn btn-download" id="btn-download">
+          <span>💾</span> Save
+        </button>
+      </div>
+    </div>
+
+    <!-- ════════════  A-FRAME AR SCENE  ════════════ -->
+    <a-scene
+      mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 1; filterMinCF: 0.001; filterBeta: 1000;"
+      color-space="sRGB"
+      renderer="colorManagement: true, physicallyCorrectLights"
+      vr-mode-ui="enabled: false"
+      device-orientation-permission-ui="enabled: false"
+      loading-screen="enabled: false"
+    >
+      <!-- ── Assets ── -->
+      <a-assets>
+        <video
+          id="ar-video"
+          src="./video.mp4"
+          preload="auto"
+          loop
+          muted
+          crossorigin="anonymous"
+          playsinline
+          webkit-playsinline
+        ></video>
+      </a-assets>
+
+      <!-- ── Camera ── -->
+      <a-camera
+        position="0 0 0"
+        look-controls="enabled: false"
+      ></a-camera>
+
+      <!-- ── Image Target (index 0) ── -->
+      <a-entity
+        id="ar-target"
+        mindar-image-target="targetIndex: 0"
+        video-overlay
+      >
+        <a-video
+          src="#ar-video"
+          position="0 0 0.01"
+          width="1"
+          height="1.5"
+          rotation="0 0 0"
+        ></a-video>
+      </a-entity>
+    </a-scene>
+
+    <!-- ════════════  Boot-up + Recording script  ════════════ -->
+    <script>
+      (function () {
+        /* ───── Boot-up ───── */
+        const splash  = document.getElementById('splash-overlay');
+        const status  = document.getElementById('splash-status');
+        const scanHud = document.getElementById('scan-hud');
+        const scene   = document.querySelector('a-scene');
+
+        scene.addEventListener('loaded', () => {
+          status.textContent = 'Starting camera…';
+        });
+
+        scene.addEventListener('arReady', () => {
+          status.textContent = 'AR ready!';
+          setTimeout(() => {
+            splash.classList.add('hidden');
+            scanHud.classList.remove('hidden');
+          }, 600);
+        });
+
+        scene.addEventListener('arError', () => {
+          status.textContent = '⚠ Camera access denied — please allow camera.';
+          status.style.color = '#f87171';
+        });
+
+        /* ───── Screen Recording ───── */
+        const recordBtn     = document.getElementById('record-btn');
+        const recTimer      = document.getElementById('rec-timer');
+        const recTimeEl     = document.getElementById('rec-time');
+        const previewOverlay = document.getElementById('preview-overlay');
+        const previewVideo  = document.getElementById('preview-video');
+        const btnShare      = document.getElementById('btn-share');
+        const btnDownload   = document.getElementById('btn-download');
+        const previewClose  = document.getElementById('preview-close');
+        const arVideo       = document.getElementById('ar-video');
+
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let recordingBlob = null;
+        let timerInterval = null;
+        let startTime = 0;
+
+        function updateTimer() {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const mins = Math.floor(elapsed / 60);
+          const secs = (elapsed % 60).toString().padStart(2, '0');
+          recTimeEl.textContent = `${mins}:${secs}`;
+        }
+
+        function startRecording() {
+          recordedChunks = [];
+
+          // Get the A-Frame canvas stream
+          const canvas = scene.canvas;
+          const canvasStream = canvas.captureStream(30);
+
+          // Try to capture audio from the AR video
+          try {
+            const videoStream = arVideo.captureStream ? arVideo.captureStream() : arVideo.mozCaptureStream();
+            const audioTracks = videoStream.getAudioTracks();
+            audioTracks.forEach(track => canvasStream.addTrack(track));
+          } catch(e) {
+            console.warn('Could not capture audio for recording:', e);
+          }
+
+          // Choose best available format
+          const mimeType = MediaRecorder.isTypeSupported('video/mp4')
+            ? 'video/mp4'
+            : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+              ? 'video/webm;codecs=vp9'
+              : 'video/webm';
+
+          mediaRecorder = new MediaRecorder(canvasStream, { mimeType });
+
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            recordingBlob = new Blob(recordedChunks, { type: mimeType });
+            const url = URL.createObjectURL(recordingBlob);
+            previewVideo.src = url;
+            previewOverlay.classList.add('visible');
+          };
+
+          mediaRecorder.start(100); // collect data every 100ms
+
+          // Show recording UI
+          recordBtn.classList.add('recording');
+          recTimer.style.display = 'flex';
+          startTime = Date.now();
+          timerInterval = setInterval(updateTimer, 500);
+        }
+
+        function stopRecording() {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+          }
+
+          // Hide recording UI
+          recordBtn.classList.remove('recording');
+          recTimer.style.display = 'none';
+          clearInterval(timerInterval);
+          recTimeEl.textContent = '0:00';
+        }
+
+        // Press and hold to record
+        recordBtn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          startRecording();
+        });
+
+        recordBtn.addEventListener('pointerup', (e) => {
+          e.preventDefault();
+          stopRecording();
+        });
+
+        recordBtn.addEventListener('pointerleave', (e) => {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            stopRecording();
+          }
+        });
+
+        // Prevent context menu on long press (mobile)
+        recordBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // ── Share button ──
+        btnShare.addEventListener('click', async () => {
+          if (!recordingBlob) return;
+
+          const ext = recordingBlob.type.includes('mp4') ? 'mp4' : 'webm';
+          const file = new File([recordingBlob], `ar-recording.${ext}`, { type: recordingBlob.type });
+
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: 'AR Coloring Page Recording',
+                text: 'Check out this AR coloring page! ✨'
+              });
+            } catch (err) {
+              if (err.name !== 'AbortError') {
+                console.warn('Share failed:', err);
+                // Fallback to download
+                downloadRecording();
+              }
+            }
+          } else {
+            // Fallback: download if Web Share API not supported
+            downloadRecording();
+          }
+        });
+
+        // ── Download button ──
+        function downloadRecording() {
+          if (!recordingBlob) return;
+          const ext = recordingBlob.type.includes('mp4') ? 'mp4' : 'webm';
+          const url = URL.createObjectURL(recordingBlob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `ar-recording.${ext}`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+
+        btnDownload.addEventListener('click', downloadRecording);
+
+        // ── Close preview ──
+        previewClose.addEventListener('click', () => {
+          previewOverlay.classList.remove('visible');
+          previewVideo.pause();
+          previewVideo.src = '';
+        });
+      })();
+    </script>
+  </body>
+</html>
