@@ -576,7 +576,7 @@
   </div>
 
   <!-- ════════════  A-FRAME AR SCENE  ════════════ -->
-  <a-scene mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 1; filterMinCF: 0.001; filterBeta: 1000;"
+  <a-scene mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 1; filterMinCF: 0.0001; filterBeta: 10;"
     color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false" loading-screen="enabled: false">
     <!-- ── Assets (6 videos) ── -->
@@ -691,48 +691,151 @@
         recTimeEl.textContent = `${mins}:${secs}`;
       }
 
+      let isRecording = false;
+      let compositeCanvas = null;
+      let compositeCtx = null;
+      let drawRAF = null;
+
       function startRecording() {
         recordedChunks = [];
+        isRecording = true;
 
-        // Get the A-Frame canvas stream
-        const canvas = scene.canvas;
-        const canvasStream = canvas.captureStream(30);
+        // ── 1. Locate the camera video element ──
+        // MindAR inserts its own <video> for the camera feed — find it
+        const cameraVideo = Array.from(document.querySelectorAll('video')).find(
+          v => v !== previewVideo && !allARVideos.includes(v)
+        );
 
-        // Try to capture audio from whichever AR video is currently active
+        // ── 2. Prepare the composite (off-screen) canvas ──
+        const aframeCanvas = scene.canvas;
+
+        // Use a resolution that balances quality with performance.
+        // On mobile the A-Frame canvas can be very large (devicePixelRatio);
+        // cap at 1280 on the long side for a smooth recording.
+        const maxDim = 1280;
+        const scale = Math.min(1, maxDim / Math.max(aframeCanvas.width, aframeCanvas.height));
+        const cW = Math.round(aframeCanvas.width  * scale);
+        const cH = Math.round(aframeCanvas.height * scale);
+
+        if (!compositeCanvas) {
+          compositeCanvas = document.createElement('canvas');
+        }
+        compositeCanvas.width  = cW;
+        compositeCanvas.height = cH;
+        compositeCtx = compositeCanvas.getContext('2d', { alpha: false });
+        // Disable image smoothing for speed — the source is already rendered
+        compositeCtx.imageSmoothingEnabled = false;
+
+        // ── 3. Pre-compute camera cover-fit values (only changes if orientation changes) ──
+        let camSX = 0, camSY = 0, camSW = 0, camSH = 0;
+        function updateCameraCrop() {
+          if (!cameraVideo || cameraVideo.videoWidth === 0) return;
+          const vW = cameraVideo.videoWidth;
+          const vH = cameraVideo.videoHeight;
+          const canvasRatio = cW / cH;
+          const videoRatio  = vW / vH;
+          if (videoRatio > canvasRatio) {
+            // video is wider → crop sides
+            camSH = vH;
+            camSW = vH * canvasRatio;
+            camSX = (vW - camSW) / 2;
+            camSY = 0;
+          } else {
+            // video is taller → crop top/bottom
+            camSW = vW;
+            camSH = vW / canvasRatio;
+            camSX = 0;
+            camSY = (vH - camSH) / 2;
+          }
+        }
+        updateCameraCrop();
+
+        // ── 4. Efficient draw loop ──
+        function drawFrame() {
+          if (!isRecording) return;
+
+          // Draw camera background (source-crop version — much faster than dest-scale)
+          if (cameraVideo && cameraVideo.readyState >= 2) {
+            if (camSW === 0) updateCameraCrop(); // first ready frame
+            compositeCtx.drawImage(cameraVideo, camSX, camSY, camSW, camSH, 0, 0, cW, cH);
+          }
+
+          // Draw A-Frame 3D layer on top (includes the overlay video)
+          compositeCtx.drawImage(aframeCanvas, 0, 0, cW, cH);
+
+          drawRAF = requestAnimationFrame(drawFrame);
+        }
+        drawFrame();
+
+        // ── 5. Build the recording stream ──
+        const canvasStream = compositeCanvas.captureStream(0); // 0 = manual
+        // Request a new frame each draw so captureStream stays in sync
+        const videoTrack = canvasStream.getVideoTracks()[0];
+
+        // Override drawFrame to also request a frame for the stream
+        const origDraw = drawFrame;
+        const syncedDraw = () => {
+          if (!isRecording) return;
+
+          if (cameraVideo && cameraVideo.readyState >= 2) {
+            if (camSW === 0) updateCameraCrop();
+            compositeCtx.drawImage(cameraVideo, camSX, camSY, camSW, camSH, 0, 0, cW, cH);
+          }
+          compositeCtx.drawImage(aframeCanvas, 0, 0, cW, cH);
+
+          // Tell captureStream to grab this frame
+          if (videoTrack.requestFrame) videoTrack.requestFrame();
+
+          drawRAF = requestAnimationFrame(syncedDraw);
+        };
+        // Cancel the first loop and start the synced one
+        cancelAnimationFrame(drawRAF);
+        syncedDraw();
+
+        // Audio — capture from the active AR video
         const activeVideo = window.__activeARVideo;
         if (activeVideo) {
           try {
-            const videoStream = activeVideo.captureStream ? activeVideo.captureStream() : activeVideo.mozCaptureStream();
-            const audioTracks = videoStream.getAudioTracks();
-            audioTracks.forEach(track => canvasStream.addTrack(track));
+            const vs = activeVideo.captureStream ? activeVideo.captureStream() : activeVideo.mozCaptureStream();
+            vs.getAudioTracks().forEach(t => canvasStream.addTrack(t));
           } catch (e) {
             console.warn('Could not capture audio for recording:', e);
           }
         }
 
-        // Choose best available format
-        const mimeType = MediaRecorder.isTypeSupported('video/mp4')
-          ? 'video/mp4'
-          : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-            ? 'video/webm;codecs=vp9'
-            : 'video/webm';
+        // ── 6. Configure MediaRecorder with high quality ──
+        const mimeType = MediaRecorder.isTypeSupported('video/mp4; codecs=avc1')
+          ? 'video/mp4; codecs=avc1'
+          : MediaRecorder.isTypeSupported('video/mp4')
+            ? 'video/mp4'
+            : MediaRecorder.isTypeSupported('video/webm;codecs=h264')
+              ? 'video/webm;codecs=h264'
+              : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+                ? 'video/webm;codecs=vp9'
+                : 'video/webm';
 
-        mediaRecorder = new MediaRecorder(canvasStream, { mimeType });
+        const recorderOptions = {
+          mimeType,
+          videoBitsPerSecond: 8_000_000   // 8 Mbps — crisp quality
+        };
+
+        mediaRecorder = new MediaRecorder(canvasStream, recorderOptions);
 
         mediaRecorder.ondataavailable = (e) => {
           if (e.data.size > 0) recordedChunks.push(e.data);
         };
 
         mediaRecorder.onstop = () => {
-          recordingBlob = new Blob(recordedChunks, { type: mimeType });
+          const finalMime = mimeType.split(';')[0]; // clean mime for Blob
+          recordingBlob = new Blob(recordedChunks, { type: finalMime });
           const url = URL.createObjectURL(recordingBlob);
           previewVideo.src = url;
           previewOverlay.classList.add('visible');
         };
 
-        mediaRecorder.start(100); // collect data every 100ms
+        mediaRecorder.start(200); // 200 ms chunks — less overhead than 100 ms
 
-        // Show recording UI
+        // UI
         recordBtn.classList.add('recording');
         recTimer.style.display = 'flex';
         startTime = Date.now();
@@ -740,6 +843,13 @@
       }
 
       function stopRecording() {
+        isRecording = false;
+
+        if (drawRAF) {
+          cancelAnimationFrame(drawRAF);
+          drawRAF = null;
+        }
+
         if (mediaRecorder && mediaRecorder.state === 'recording') {
           mediaRecorder.stop();
         }
