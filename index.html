@@ -8,7 +8,10 @@
   <meta name="description"
     content="Scan your coloring page to see it come alive with an animated video overlay using Augmented Reality." />
 
-  <!-- A-Frame & MindAR Image Tracking -->
+  <!-- A-Frame & MindAR Image Tracking — preload hints for faster fetch -->
+  <link rel="preload" href="https://aframe.io/releases/1.6.0/aframe.min.js" as="script" crossorigin />
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js" as="script" crossorigin />
+  <link rel="preload" href="./targets.mind" as="fetch" crossorigin />
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
@@ -450,8 +453,45 @@
     }
   </style>
 
-  <!-- ── Video-overlay A-Frame component (multi-target) ── -->
+  <!-- ── Smooth-tracking & Video-overlay A-Frame components ── -->
   <script>
+    /* ──────────────────────────────────────────────────────────
+     *  smooth-track — exponential smoothing on position & rotation
+     *  Applies a lerp every tick so micro-jitter from the tracker
+     *  is absorbed before it reaches the rendered entity.
+     * ────────────────────────────────────────────────────────── */
+    AFRAME.registerComponent('smooth-track', {
+      schema: {
+        factor: { type: 'number', default: 0.15 }   /* 0 = frozen, 1 = raw tracking */
+      },
+
+      init: function () {
+        this._smoothPos = new THREE.Vector3();
+        this._smoothQuat = new THREE.Quaternion();
+        this._initialised = false;
+      },
+
+      tick: function () {
+        const obj = this.el.object3D;
+        const f = this.data.factor;
+
+        if (!this._initialised) {
+          this._smoothPos.copy(obj.position);
+          this._smoothQuat.copy(obj.quaternion);
+          this._initialised = true;
+          return;
+        }
+
+        // Lerp position
+        this._smoothPos.lerp(obj.position, f);
+        obj.position.copy(this._smoothPos);
+
+        // Slerp rotation
+        this._smoothQuat.slerp(obj.quaternion, f);
+        obj.quaternion.copy(this._smoothQuat);
+      }
+    });
+
     /* Global ref so the recording script knows which video is playing */
     window.__activeARVideo = null;
 
@@ -486,6 +526,11 @@
           }
 
           window.__activeARVideo = video;
+
+          // Eagerly kick-start the video load if it hasn't begun yet
+          if (video.preload === 'none') video.preload = 'auto';
+          video.load();
+
           video.currentTime = 0;
           video.muted = false;
           const playPromise = video.play();
@@ -576,49 +621,49 @@
   </div>
 
   <!-- ════════════  A-FRAME AR SCENE  ════════════ -->
-  <a-scene mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 1; filterMinCF: 0.0001; filterBeta: 10;"
+  <a-scene mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 1; filterMinCF: 0.00001; filterBeta: 0.5; warmupTolerance: 5; missTolerance: 5;"
     color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false" loading-screen="enabled: false">
-    <!-- ── Assets (6 videos) ── -->
-    <a-assets>
-      <video id="ar-video-0" src="./videos/6.mp4" preload="auto" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-1" src="./videos/8.mp4" preload="auto" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-2" src="./videos/9.mp4" preload="auto" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-3" src="./videos/10.mp4" preload="auto" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-4" src="./videos/43.mp4" preload="auto" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-5" src="./videos/48.mp4" preload="auto" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
+    <!-- ── Assets (6 videos) — preload="none" so they don't block startup ── -->
+    <a-assets timeout="1">
+      <video id="ar-video-0" src="./videos/6.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
+      <video id="ar-video-1" src="./videos/8.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
+      <video id="ar-video-2" src="./videos/9.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
+      <video id="ar-video-3" src="./videos/10.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
+      <video id="ar-video-4" src="./videos/43.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
+      <video id="ar-video-5" src="./videos/48.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
     </a-assets>
 
     <!-- ── Camera ── -->
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
     <!-- ── Page 1 — Target Index 0 ── -->
-    <a-entity id="ar-target-0" mindar-image-target="targetIndex: 0" video-overlay="videoSelector: #ar-video-0">
+    <a-entity id="ar-target-0" mindar-image-target="targetIndex: 0" video-overlay="videoSelector: #ar-video-0" smooth-track="factor: 0.12">
       <a-video src="#ar-video-0" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
     </a-entity>
 
     <!-- ── Page 2 — Target Index 1 ── -->
-    <a-entity id="ar-target-1" mindar-image-target="targetIndex: 1" video-overlay="videoSelector: #ar-video-1">
+    <a-entity id="ar-target-1" mindar-image-target="targetIndex: 1" video-overlay="videoSelector: #ar-video-1" smooth-track="factor: 0.12">
       <a-video src="#ar-video-1" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
     </a-entity>
 
     <!-- ── Page 3 — Target Index 2 ── -->
-    <a-entity id="ar-target-2" mindar-image-target="targetIndex: 2" video-overlay="videoSelector: #ar-video-2">
+    <a-entity id="ar-target-2" mindar-image-target="targetIndex: 2" video-overlay="videoSelector: #ar-video-2" smooth-track="factor: 0.12">
       <a-video src="#ar-video-2" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
     </a-entity>
 
     <!-- ── Page 4 — Target Index 3 ── -->
-    <a-entity id="ar-target-3" mindar-image-target="targetIndex: 3" video-overlay="videoSelector: #ar-video-3">
+    <a-entity id="ar-target-3" mindar-image-target="targetIndex: 3" video-overlay="videoSelector: #ar-video-3" smooth-track="factor: 0.12">
       <a-video src="#ar-video-3" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
     </a-entity>
 
     <!-- ── Page 5 — Target Index 4 ── -->
-    <a-entity id="ar-target-4" mindar-image-target="targetIndex: 4" video-overlay="videoSelector: #ar-video-4">
+    <a-entity id="ar-target-4" mindar-image-target="targetIndex: 4" video-overlay="videoSelector: #ar-video-4" smooth-track="factor: 0.12">
       <a-video src="#ar-video-4" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
     </a-entity>
 
     <!-- ── Page 6 — Target Index 5 ── -->
-    <a-entity id="ar-target-5" mindar-image-target="targetIndex: 5" video-overlay="videoSelector: #ar-video-5">
+    <a-entity id="ar-target-5" mindar-image-target="targetIndex: 5" video-overlay="videoSelector: #ar-video-5" smooth-track="factor: 0.12">
       <a-video src="#ar-video-5" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
     </a-entity>
   </a-scene>
