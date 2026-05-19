@@ -624,53 +624,58 @@
   <a-scene mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 1; filterMinCF: 0.00001; filterBeta: 0.5; warmupTolerance: 5; missTolerance: 5;"
     color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false" loading-screen="enabled: false">
-    <!-- ── Assets (6 videos) — preload="none" so they don't block startup ── -->
-    <a-assets timeout="1">
-      <video id="ar-video-0" src="./videos/6.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-1" src="./videos/8.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-2" src="./videos/9.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-3" src="./videos/10.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-4" src="./videos/43.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-      <video id="ar-video-5" src="./videos/48.mp4" preload="none" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
-    </a-assets>
+    <!-- ── Assets (52 videos) — injected by script below ── -->
+    <a-assets id="ar-assets" timeout="1"></a-assets>
 
     <!-- ── Camera ── -->
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-    <!-- ── Page 1 — Target Index 0 ── -->
-    <a-entity id="ar-target-0" mindar-image-target="targetIndex: 0" video-overlay="videoSelector: #ar-video-0" smooth-track="factor: 0.12">
-      <a-video src="#ar-video-0" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
-    </a-entity>
-
-    <!-- ── Page 2 — Target Index 1 ── -->
-    <a-entity id="ar-target-1" mindar-image-target="targetIndex: 1" video-overlay="videoSelector: #ar-video-1" smooth-track="factor: 0.12">
-      <a-video src="#ar-video-1" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
-    </a-entity>
-
-    <!-- ── Page 3 — Target Index 2 ── -->
-    <a-entity id="ar-target-2" mindar-image-target="targetIndex: 2" video-overlay="videoSelector: #ar-video-2" smooth-track="factor: 0.12">
-      <a-video src="#ar-video-2" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
-    </a-entity>
-
-    <!-- ── Page 4 — Target Index 3 ── -->
-    <a-entity id="ar-target-3" mindar-image-target="targetIndex: 3" video-overlay="videoSelector: #ar-video-3" smooth-track="factor: 0.12">
-      <a-video src="#ar-video-3" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
-    </a-entity>
-
-    <!-- ── Page 5 — Target Index 4 ── -->
-    <a-entity id="ar-target-4" mindar-image-target="targetIndex: 4" video-overlay="videoSelector: #ar-video-4" smooth-track="factor: 0.12">
-      <a-video src="#ar-video-4" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
-    </a-entity>
-
-    <!-- ── Page 6 — Target Index 5 ── -->
-    <a-entity id="ar-target-5" mindar-image-target="targetIndex: 5" video-overlay="videoSelector: #ar-video-5" smooth-track="factor: 0.12">
-      <a-video src="#ar-video-5" position="0 0 0.01" width="1" height="1.5" rotation="0 0 0"></a-video>
-    </a-entity>
+    <!-- ── 52 AR target entities — injected by script below ── -->
   </a-scene>
+
+  <!-- ════════════  Dynamic 52-target injection  ════════════ -->
+  <script>
+    (function () {
+      const TOTAL_TARGETS = 52;
+      const assetsEl = document.getElementById('ar-assets');
+      const sceneEl = document.querySelector('a-scene');
+
+      for (let i = 0; i < TOTAL_TARGETS; i++) {
+        const num = i + 1;                       // 1-based file name
+        const vid = document.createElement('video');
+        vid.id = 'ar-video-' + i;
+        vid.src = './videos/' + num + '.mp4';
+        vid.setAttribute('preload', 'none');
+        vid.setAttribute('loop', '');
+        vid.setAttribute('crossorigin', 'anonymous');
+        vid.setAttribute('playsinline', '');
+        vid.setAttribute('webkit-playsinline', '');
+        assetsEl.appendChild(vid);
+
+        const entity = document.createElement('a-entity');
+        entity.id = 'ar-target-' + i;
+        entity.setAttribute('mindar-image-target', 'targetIndex: ' + i);
+        entity.setAttribute('video-overlay', 'videoSelector: #ar-video-' + i);
+        entity.setAttribute('smooth-track', 'factor: 0.12');
+
+        const aVideo = document.createElement('a-video');
+        aVideo.setAttribute('src', '#ar-video-' + i);
+        aVideo.setAttribute('position', '0 0 0.01');
+        aVideo.setAttribute('width', '1');
+        aVideo.setAttribute('height', '1.5');
+        aVideo.setAttribute('rotation', '0 0 0');
+        entity.appendChild(aVideo);
+
+        sceneEl.appendChild(entity);
+      }
+    })();
+  </script>
 
   <!-- ════════════  Boot-up + Recording script  ════════════ -->
   <script>
     (function () {
+      const TOTAL_TARGETS = 52;
+
       /* ───── Boot-up ───── */
       const splash = document.getElementById('splash-overlay');
       const status = document.getElementById('splash-status');
@@ -704,15 +709,11 @@
       const btnDownload = document.getElementById('btn-download');
       const previewClose = document.getElementById('preview-close');
 
-      // Collect all AR video elements
-      const allARVideos = [
-        document.getElementById('ar-video-0'),
-        document.getElementById('ar-video-1'),
-        document.getElementById('ar-video-2'),
-        document.getElementById('ar-video-3'),
-        document.getElementById('ar-video-4'),
-        document.getElementById('ar-video-5'),
-      ];
+      // Collect all 52 AR video elements dynamically
+      const allARVideos = [];
+      for (let i = 0; i < TOTAL_TARGETS; i++) {
+        allARVideos.push(document.getElementById('ar-video-' + i));
+      }
 
       // Unlock audio on any screen interaction (bypasses mobile autoplay policies without a UI button)
       const unlockAudio = () => {
