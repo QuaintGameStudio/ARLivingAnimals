@@ -627,7 +627,7 @@
   </div>
 
   <!-- ════════════  A-FRAME AR SCENE  ════════════ -->
-  <a-scene mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 1; filterMinCF: 0.00001; filterBeta: 0.5; warmupTolerance: 5; missTolerance: 5; uiScanning: no;"
+  <a-scene mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 1; filterMinCF: 0.0001; filterBeta: 0.001; warmupTolerance: 5; missTolerance: 5; uiScanning: no;"
     color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false" loading-screen="enabled: false">
     <!-- ── Assets (52 videos) — injected by script below ── -->
@@ -662,7 +662,8 @@
         entity.id = 'ar-target-' + i;
         entity.setAttribute('mindar-image-target', 'targetIndex: ' + i);
         entity.setAttribute('video-overlay', 'videoSelector: #ar-video-' + i);
-        entity.setAttribute('smooth-track', 'factor: 0.12');
+        // Aggressive smoothing (lower factor = more stable, slight lag)
+        entity.setAttribute('smooth-track', 'factor: 0.04');
 
         const aVideo = document.createElement('a-video');
         aVideo.setAttribute('src', '#ar-video-' + i);
